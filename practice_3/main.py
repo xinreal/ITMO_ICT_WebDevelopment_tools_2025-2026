@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException
 from sqlmodel import Session, SQLModel, select
 
-from connection import create_db_and_tables, get_session
+from connection import get_session
 from models import (
     Organizer,
     Participant,
@@ -20,10 +20,7 @@ app = FastAPI(title="Hackathon API")
 def root():
     return {"message": "Hackathon API is running"}
 
-
-# =========================
-# SCHEMAS
-# =========================
+# schemas
 
 class OrganizerCreate(SQLModel):
     full_name: str
@@ -132,9 +129,7 @@ class ChallengeTaskUpdate(SQLModel):
     evaluation_criteria: str | None = None
     hackathon_id: int | None = None
 
-# =========================
-# ORGANIZERS
-# =========================
+# organizers
 
 @app.post("/organizers/", response_model=OrganizerPublic)
 def create_organizer(
@@ -197,9 +192,7 @@ def delete_organizer(
     return {"ok": True}
 
 
-# =========================
-# PARTICIPANTS
-# =========================
+# participants
 
 @app.post("/participants/", response_model=ParticipantPublic)
 def create_participant(
@@ -335,9 +328,7 @@ def delete_hackathon(
     session.commit()
     return {"ok": True}
 
-# =========================
-# TASKS
-# =========================
+# tasks
 
 @app.post("/tasks/", response_model=ChallengeTaskPublic)
 def create_task(
@@ -409,10 +400,9 @@ def delete_task(
     session.commit()
     return {"ok": True}
 
-# =========================
-# MANY-TO-MANY
+# m-t-m
 # participant <-> hackathon
-# =========================
+
 
 @app.post("/hackathons/{hackathon_id}/participants/{participant_id}")
 def add_participant_to_hackathon(
@@ -447,10 +437,7 @@ def add_participant_to_hackathon(
 
     return {"message": "Participant added to hackathon"}
 
-
-# =========================
-# NESTED VIEW
-# =========================
+#
 
 @app.get("/hackathons/{hackathon_id}/full", response_model=HackathonFull)
 def read_hackathon_full(
