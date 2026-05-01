@@ -2,8 +2,8 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlmodel import Session, SQLModel, select
-
-from connection import create_db_and_tables, get_session
+from fastapi.security import OAuth2PasswordRequestForm
+from connection import get_session
 from models import (
     Organizer,
     Participant,
@@ -12,6 +12,14 @@ from models import (
     ParticipantHackathonLink,
     HackathonFormat,
 )
+from sqlmodel import Session, SQLModel, select
+from security import (
+    get_password_hash,
+    authenticate_user,
+    create_access_token,
+    get_current_active_user,
+)
+from models import User
 
 app = FastAPI(title="Hackathon API")
 
@@ -20,10 +28,7 @@ app = FastAPI(title="Hackathon API")
 def root():
     return {"message": "Hackathon API is running"}
 
-
-# =========================
-# SCHEMAS
-# =========================
+# schemas
 
 class OrganizerCreate(SQLModel):
     full_name: str
@@ -132,9 +137,36 @@ class ChallengeTaskUpdate(SQLModel):
     evaluation_criteria: str | None = None
     hackathon_id: int | None = None
 
-# =========================
-# ORGANIZERS
-# =========================
+class UserRegister(SQLModel):
+    username: str
+    email: str
+    full_name: str | None = None
+    password: str
+
+
+class UserLogin(SQLModel):
+    username: str
+    password: str
+
+
+class UserPublic(SQLModel):
+    id: int
+    username: str
+    email: str
+    full_name: str | None = None
+    is_active: bool
+
+
+class Token(SQLModel):
+    access_token: str
+    token_type: str
+
+
+class ChangePasswordRequest(SQLModel):
+    old_password: str
+    new_password: str
+
+# organizers
 
 @app.post("/organizers/", response_model=OrganizerPublic)
 def create_organizer(
@@ -197,9 +229,7 @@ def delete_organizer(
     return {"ok": True}
 
 
-# =========================
-# PARTICIPANTS
-# =========================
+# participants
 
 @app.post("/participants/", response_model=ParticipantPublic)
 def create_participant(
@@ -335,9 +365,7 @@ def delete_hackathon(
     session.commit()
     return {"ok": True}
 
-# =========================
-# TASKS
-# =========================
+# tasks
 
 @app.post("/tasks/", response_model=ChallengeTaskPublic)
 def create_task(
@@ -409,10 +437,9 @@ def delete_task(
     session.commit()
     return {"ok": True}
 
-# =========================
-# MANY-TO-MANY
+# m-t-m
 # participant <-> hackathon
-# =========================
+
 
 @app.post("/hackathons/{hackathon_id}/participants/{participant_id}")
 def add_participant_to_hackathon(
@@ -447,10 +474,7 @@ def add_participant_to_hackathon(
 
     return {"message": "Participant added to hackathon"}
 
-
-# =========================
-# NESTED VIEW
-# =========================
+#
 
 @app.get("/hackathons/{hackathon_id}/full", response_model=HackathonFull)
 def read_hackathon_full(
@@ -520,3 +544,83 @@ def read_hackathon_full(
         participants=participants_list,
         tasks=task_list
     )
+
+# auth/users
+
+@app.post("/auth/register", response_model=UserPublic)
+def register_user(
+    user_data: UserRegister,
+    session: Session = Depends(get_session)
+):
+    existing_username = session.exec(
+        select(User).where(User.username == user_data.username)
+    ).first()
+    if existing_username:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    existing_email = session.exec(
+        select(User).where(User.email == user_data.email)
+    ).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    user = User(
+        username=user_data.username,
+        email=user_data.email,
+        full_name=user_data.full_name,
+        hashed_password=get_password_hash(user_data.password),
+        is_active=True,
+    )
+
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@app.post("/auth/login", response_model=Token)
+def login_user(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session)
+):
+    user = authenticate_user(session, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    access_token = create_access_token(data={"sub": user.username})
+    return Token(access_token=access_token, token_type="bearer")
+
+@app.get("/users/me", response_model=UserPublic)
+def read_users_me(current_user: User = Depends(get_current_active_user)):
+    return current_user
+
+
+@app.get("/users", response_model=list[UserPublic])
+def read_users(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    users = session.exec(select(User)).all()
+    return users
+
+
+@app.post("/users/change-password")
+def change_password(
+    password_data: ChangePasswordRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.hashed_password is None:
+        raise HTTPException(status_code=400, detail="Password is not set")
+
+    from security import verify_password
+
+    if not verify_password(password_data.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Old password is incorrect")
+
+    current_user.hashed_password = get_password_hash(password_data.new_password)
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+
+    return {"message": "Password changed successfully"}
