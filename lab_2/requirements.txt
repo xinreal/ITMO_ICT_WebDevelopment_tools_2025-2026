@@ -1,0 +1,7 @@
+requests
+aiohttp
+beautifulsoup4
+sqlmodel
+psycopg2-binary
+python-dotenv
+pytest

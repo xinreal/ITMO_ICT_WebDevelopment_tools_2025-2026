@@ -1,0 +1,6 @@
+site_name: Web Development Labs
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Lab 2: lab_2.md
